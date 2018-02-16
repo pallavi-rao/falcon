@@ -170,7 +170,7 @@ public class WorkflowExecutionContext {
         return getValue(WorkflowExecutionArgs.LOG_FILE);
     }
 
-    String getNominalTime() {
+    public String getNominalTime() {
         return getValue(WorkflowExecutionArgs.NOMINAL_TIME);
     }
 
@@ -184,6 +184,10 @@ public class WorkflowExecutionContext {
 
     String getTimestamp() {
         return getValue(WorkflowExecutionArgs.TIMESTAMP);
+    }
+
+    public boolean hasTimeStamp() {
+        return containsKey(WorkflowExecutionArgs.TIMESTAMP);
     }
 
     /**
@@ -295,16 +299,20 @@ public class WorkflowExecutionContext {
         return getValue(WorkflowExecutionArgs.WORKFLOW_ID);
     }
 
+    public String getWorkflowParentId() {
+        return getValue(WorkflowExecutionArgs.PARENT_ID);
+    }
+
     public String getUserSubflowId() {
         return getValue(WorkflowExecutionArgs.USER_SUBFLOW_ID);
     }
 
     public int getWorkflowRunId() {
-        return Integer.parseInt(getValue(WorkflowExecutionArgs.RUN_ID));
+        return Integer.parseInt(getValue(WorkflowExecutionArgs.RUN_ID, "0"));
     }
 
     public String getWorkflowRunIdString() {
-        return String.valueOf(Integer.parseInt(getValue(WorkflowExecutionArgs.RUN_ID)));
+        return String.valueOf(Integer.parseInt(getValue(WorkflowExecutionArgs.RUN_ID, "0")));
     }
 
     public String getWorkflowUser() {

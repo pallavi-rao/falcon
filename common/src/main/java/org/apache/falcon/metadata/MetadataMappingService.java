@@ -18,7 +18,12 @@
 
 package org.apache.falcon.metadata;
 
+import com.thinkaurelius.titan.core.EdgeLabel;
+import com.thinkaurelius.titan.core.Order;
+import com.thinkaurelius.titan.core.PropertyKey;
+import com.thinkaurelius.titan.core.schema.TitanManagement;
 import com.thinkaurelius.titan.graphdb.blueprints.TitanBlueprintsGraph;
+import com.tinkerpop.blueprints.Direction;
 import com.tinkerpop.blueprints.Edge;
 import com.tinkerpop.blueprints.Graph;
 import com.tinkerpop.blueprints.GraphFactory;
@@ -30,6 +35,7 @@ import com.tinkerpop.blueprints.util.TransactionWork;
 import org.apache.commons.configuration.BaseConfiguration;
 import org.apache.commons.configuration.Configuration;
 import org.apache.falcon.FalconException;
+import org.apache.falcon.FalconRuntimException;
 import org.apache.falcon.entity.store.ConfigurationStore;
 import org.apache.falcon.entity.v0.Entity;
 import org.apache.falcon.entity.v0.EntityType;
@@ -43,6 +49,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.falcon.workflow.WorkflowExecutionContext;
 import org.apache.falcon.workflow.WorkflowExecutionListener;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
@@ -64,7 +73,26 @@ public class MetadataMappingService
      * Constant for the configuration property that indicates the prefix.
      */
     private static final String FALCON_PREFIX = "falcon.graph.";
-
+    /**
+     * Constant for the configuration property that indicates the storage backend.
+     */
+    public static final String PROPERTY_KEY_STORAGE_BACKEND = "storage.backend";
+    public static final String STORAGE_BACKEND_HBASE = "hbase";
+    public static final String STORAGE_BACKEND_BDB = "berkeleyje";
+    /**
+     * HBase configuration properties.
+     */
+    public static final String PROPERTY_KEY_STORAGE_HOSTNAME = "storage.hostname";
+    public static final String PROPERTY_KEY_STORAGE_TABLE = "storage.hbase.table";
+    public static final Set<String> PROPERTY_KEYS_HBASE = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            PROPERTY_KEY_STORAGE_HOSTNAME, PROPERTY_KEY_STORAGE_TABLE)));
+    /**
+     * Berkeley DB configuration properties.
+     */
+    public static final String PROPERTY_KEY_STORAGE_DIRECTORY = "storage.directory";
+    public static final String PROPERTY_KEY_SERIALIZE_PATH = "serialize.path";
+    public static final Set<String> PROPERTY_KEYS_BDB = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            PROPERTY_KEY_STORAGE_DIRECTORY, PROPERTY_KEY_SERIALIZE_PATH)));
 
     private Graph graph;
     private Set<String> vertexIndexedKeys;
@@ -111,11 +139,56 @@ public class MetadataMappingService
         }
     }
 
-    protected Graph initializeGraphDB() {
+    public static Graph initializeGraphDB() {
         LOG.info("Initializing graph db");
-
         Configuration graphConfig = getConfiguration();
+        validateConfiguration(graphConfig);
         return GraphFactory.open(graphConfig);
+    }
+
+    private static void validateConfiguration(Configuration graphConfig) {
+        // check if storage backend if configured
+        if (!graphConfig.containsKey(PROPERTY_KEY_STORAGE_BACKEND)) {
+            throw new FalconRuntimException("Titan GraphDB storage backend is not configured. "
+                    + "You need to choose either hbase or berkeleydb."
+                    + "Please check Configuration twiki or "
+                    + "the section Graph Database Properties in startup.properties "
+                    + "on how to configure Titan GraphDB backend.");
+        }
+
+        String backend = graphConfig.getString(PROPERTY_KEY_STORAGE_BACKEND);
+        switch (backend) {
+        case STORAGE_BACKEND_BDB:
+            // check required parameter for Berkeley DB backend
+            for (String key : PROPERTY_KEYS_BDB) {
+                if (!graphConfig.containsKey(key)) {
+                    throw new FalconRuntimException("Required parameter " + FALCON_PREFIX + key
+                            + " not found in startup.properties."
+                            + "Please check Configuration twiki or "
+                            + "the section Graph Database Properties in startup.properties "
+                            + "on how to configure Berkeley DB storage backend.");
+                }
+            }
+            break;
+        case STORAGE_BACKEND_HBASE:
+            // check required parameter for HBase backend
+            for (String key : PROPERTY_KEYS_HBASE) {
+                if (!graphConfig.containsKey(key)) {
+                    throw new FalconRuntimException("Required parameter " + FALCON_PREFIX + key
+                            + " not found in startup.properties."
+                            + "Please check Configuration twiki or "
+                            + "the section Graph Database Properties in startup.properties "
+                            + "on how to configure HBase storage backend.");
+                }
+            }
+            break;
+        default:
+            throw new FalconRuntimException("Invalid graph storage backend: " + backend + ". "
+                    + "You need to choose either hbase or berkeleydb."
+                    + "Please check Configuration twiki or "
+                    + "the section Graph Database Properties in startup.properties "
+                    + "on how to configure Titan GraphDB backend.");
+        }
     }
 
     public static Configuration getConfiguration() {
@@ -150,24 +223,41 @@ public class MetadataMappingService
         makeKeyIndex(RelationshipProperty.TYPE.getName());
         makeKeyIndex(RelationshipProperty.TIMESTAMP.getName());
         makeKeyIndex(RelationshipProperty.VERSION.getName());
+        makeInstanceIndex();
+    }
+
+    private void makeInstanceIndex() {
+        // build index for instance search
+        TitanManagement titanManagement = getTitanGraph().getManagementSystem();
+        PropertyKey statusKey = makePropertyKey(titanManagement, RelationshipProperty.STATUS.getName());
+        PropertyKey nominalTimeKey = makePropertyKey(titanManagement, RelationshipProperty.NOMINAL_TIME.getName());
+        EdgeLabel edgeLabel = titanManagement.makeEdgeLabel(RelationshipLabel.INSTANCE_ENTITY_EDGE.getName()).make();
+        titanManagement.buildEdgeIndex(edgeLabel, "indexInstanceN", Direction.OUT, Order.DESC, nominalTimeKey);
+        titanManagement.buildEdgeIndex(edgeLabel, "indexInstanceSN", Direction.OUT, Order.DESC,
+                statusKey, nominalTimeKey);
+        titanManagement.commit();
     }
 
     private void makeNameKeyIndex() {
-        getTitanGraph().makeKey(RelationshipProperty.NAME.getName())
-                .dataType(String.class)
-                .indexed(Vertex.class)
-                .indexed(Edge.class)
-                // .unique() todo this ought to be unique?
-                .make();
-        getTitanGraph().commit();
+        TitanManagement titanManagement = getTitanGraph().getManagementSystem();
+        PropertyKey nameKey = makePropertyKey(titanManagement, RelationshipProperty.NAME.getName());
+        titanManagement.buildIndex("indexByVertexName", Vertex.class).addKey(nameKey).buildCompositeIndex();
+        titanManagement.buildIndex("indexByEdgeName", Edge.class).addKey(nameKey).buildCompositeIndex();
+        titanManagement.commit();
     }
 
     private void makeKeyIndex(String key) {
-        getTitanGraph().makeKey(key)
-                .dataType(String.class)
-                .indexed(Vertex.class)
-                .make();
-        getTitanGraph().commit();
+        TitanManagement titanManagement = getTitanGraph().getManagementSystem();
+        PropertyKey propertyKey = makePropertyKey(titanManagement, key);
+        titanManagement.buildIndex("indexBy" + key, Vertex.class).addKey(propertyKey).buildCompositeIndex();
+        titanManagement.commit();
+    }
+
+    private PropertyKey makePropertyKey(TitanManagement titanManagement, String key) {
+        if (titanManagement.containsPropertyKey(key)) {
+            return titanManagement.getPropertyKey(key);
+        }
+        return titanManagement.makePropertyKey(key).dataType(String.class).make();
     }
 
     public Graph getGraph() {
@@ -257,14 +347,42 @@ public class MetadataMappingService
     }
 
     @Override
+    public void onStart(final WorkflowExecutionContext context) throws FalconException {
+        LOG.info("onStart {}", context);
+        onInstanceExecutionUpdate(context);
+    }
+
+    @Override
     public void onSuccess(final WorkflowExecutionContext context) throws FalconException {
-        LOG.info("Adding lineage for context {}", context);
+        LOG.info("onSuccess {}", context);
+        onInstanceExecutionUpdate(context);
+    }
+
+    @Override
+    public void onFailure(final WorkflowExecutionContext context) throws FalconException {
+        LOG.info("onFailure {}", context);
+        onInstanceExecutionUpdate(context);
+    }
+
+    @Override
+    public void onSuspend(final WorkflowExecutionContext context) throws FalconException {
+        LOG.info("onSuspend {}", context);
+        onInstanceExecutionUpdate(context);
+    }
+
+    @Override
+    public void onWait(final WorkflowExecutionContext context) throws FalconException {
+        LOG.info("onWait {}", context);
+        onInstanceExecutionUpdate(context);
+    }
+
+    private void onInstanceExecutionUpdate(final WorkflowExecutionContext context) throws FalconException {
         try {
             new TransactionRetryHelper.Builder<Void>(getTransactionalGraph())
                     .perform(new TransactionWork<Void>() {
                         @Override
                         public Void execute(TransactionalGraph transactionalGraph) throws Exception {
-                            onSuccessfulExecution(context);
+                            updateInstanceStatus(context);
                             transactionalGraph.commit();
                             return null;
                         }
@@ -275,64 +393,58 @@ public class MetadataMappingService
         }
     }
 
-    private void onSuccessfulExecution(final WorkflowExecutionContext context) throws FalconException {
+    private void updateInstanceStatus(final WorkflowExecutionContext context) throws FalconException {
         WorkflowExecutionContext.EntityOperations entityOperation = context.getOperation();
+        if (context.getContextType() == WorkflowExecutionContext.Type.COORDINATOR_ACTION
+                && entityOperation != WorkflowExecutionContext.EntityOperations.GENERATE) {
+            // TODO(yzheng): FALCON-2114 Feed Instance update on titan DB
+            //               based on JMS notifications on coordinator actions
+            return;
+        }
+
         switch (entityOperation) {
         case GENERATE:
-            onProcessInstanceExecuted(context);
+            updateProcessInstance(context);
             break;
         case REPLICATE:
-            onFeedInstanceReplicated(context);
+            updateReplicatedFeedInstance(context);
             break;
         case DELETE:
-            onFeedInstanceEvicted(context);
+            updateEvictedFeedInstance(context);
             break;
         case IMPORT:
-            onFeedInstanceImported(context);
+            updateImportedFeedInstance(context);
+            break;
+        case EXPORT:
+            updateExportedFeedInstance(context);
             break;
         default:
             throw new IllegalArgumentException("Invalid EntityOperation - " + entityOperation);
         }
     }
 
-    @Override
-    public void onFailure(WorkflowExecutionContext context) throws FalconException {
-        // do nothing since lineage is only recorded for successful workflow
-    }
-
-    @Override
-    public void onStart(WorkflowExecutionContext context) throws FalconException {
-        // Do nothing
-    }
-
-    @Override
-    public void onSuspend(WorkflowExecutionContext context) throws FalconException {
-        // Do nothing
-    }
-
-    @Override
-    public void onWait(WorkflowExecutionContext context) throws FalconException {
-        // TBD
-    }
-
-
-    private void onProcessInstanceExecuted(WorkflowExecutionContext context) throws FalconException {
+    private void updateProcessInstance(WorkflowExecutionContext context) throws FalconException {
+        LOG.info("Updating process instance: {}", context.getNominalTimeAsISO8601());
         Vertex processInstance = instanceGraphBuilder.addProcessInstance(context);
         instanceGraphBuilder.addOutputFeedInstances(context, processInstance);
         instanceGraphBuilder.addInputFeedInstances(context, processInstance);
     }
 
-    private void onFeedInstanceReplicated(WorkflowExecutionContext context) throws FalconException {
-        LOG.info("Adding replicated feed instance: {}", context.getNominalTimeAsISO8601());
+    private void updateReplicatedFeedInstance(WorkflowExecutionContext context) throws FalconException {
+        LOG.info("Updating replicated feed instance: {}", context.getNominalTimeAsISO8601());
         instanceGraphBuilder.addReplicatedInstance(context);
     }
 
-    private void onFeedInstanceEvicted(WorkflowExecutionContext context) throws FalconException {
-        LOG.info("Adding evicted feed instance: {}", context.getNominalTimeAsISO8601());
+    private void updateEvictedFeedInstance(WorkflowExecutionContext context) throws FalconException {
+        LOG.info("Updating evicted feed instance: {}", context.getNominalTimeAsISO8601());
         instanceGraphBuilder.addEvictedInstance(context);
     }
-    private void onFeedInstanceImported(WorkflowExecutionContext context) throws FalconException {
-        LOG.info("Adding imported feed instance: {}", context.getNominalTimeAsISO8601());
+    private void updateImportedFeedInstance(WorkflowExecutionContext context) throws FalconException {
+        LOG.info("Updating imported feed instance: {}", context.getNominalTimeAsISO8601());
         instanceGraphBuilder.addImportedInstance(context);
+    }
+    private void updateExportedFeedInstance(WorkflowExecutionContext context) throws FalconException {
+        LOG.info("Updating export feed instance: {}", context.getNominalTimeAsISO8601());
+        instanceGraphBuilder.addExportedInstance(context);
     }
 }

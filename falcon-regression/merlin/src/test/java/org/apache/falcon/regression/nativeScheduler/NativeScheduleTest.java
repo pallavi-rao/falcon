@@ -21,10 +21,13 @@ import org.apache.falcon.regression.Entities.ProcessMerlin;
 import org.apache.falcon.regression.core.bundle.Bundle;
 import org.apache.falcon.regression.core.helpers.ColoHelper;
 import org.apache.falcon.regression.core.response.ServiceResponse;
-import org.apache.falcon.regression.core.util.*;
+import org.apache.falcon.regression.core.util.AssertUtil;
+import org.apache.falcon.regression.core.util.BundleUtil;
+import org.apache.falcon.regression.core.util.OSUtil;
+import org.apache.falcon.regression.core.util.TimeUtil;
+import org.apache.falcon.regression.core.util.Util;
 import org.apache.falcon.regression.testHelper.BaseTestClass;
 import org.apache.log4j.Logger;
-import org.apache.oozie.client.OozieClient;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeClass;
 import org.testng.annotations.BeforeMethod;
@@ -181,7 +184,7 @@ public class NativeScheduleTest extends BaseTestClass {
      * Successfully schedule process via native scheduler through prism and server on multiple cluster.
      * Schedule the same process on oozie. It should fail.
      */
-    @Test(groups = {"prism", "0.2"})
+    @Test(groups = {"prism", "0.2", "multiCluster"})
     public void scheduleProcessWithNativeOnTwoClusters() throws Exception {
 
         ProcessMerlin processMerlinNative = bundles[0].getProcessObject();

@@ -54,7 +54,7 @@ import java.util.List;
     3. feed : same as test 1 for feed
     4. feed : same as test 2 for feed
  */
-@Test(groups = "embedded")
+@Test(groups = { "distributed", "embedded" })
 public class InstanceSummaryTest extends BaseTestClass {
 
     private String baseTestHDFSDir = cleanAndGetTestDir();
@@ -173,7 +173,7 @@ public class InstanceSummaryTest extends BaseTestClass {
     /**
      * Adjust multi-cluster process. Submit and schedule it. Get its instances summary.
      */
-    @Test(enabled = true, timeOut = 1200000)
+    @Test(enabled = true, timeOut = 1200000, groups = "multiCluster")
     public void testSummaryMultiClusterProcess() throws JAXBException,
             ParseException, IOException, URISyntaxException, AuthenticationException,
             InterruptedException {
@@ -208,7 +208,7 @@ public class InstanceSummaryTest extends BaseTestClass {
     /**
      *  Adjust multi-cluster feed. Submit and schedule it. Get its instances summary.
      */
-    @Test(enabled = true, timeOut = 1200000)
+    @Test(enabled = true, timeOut = 1200000, groups = "multiCluster")
     public void testSummaryMultiClusterFeed() throws JAXBException, ParseException, IOException,
             URISyntaxException, OozieClientException, AuthenticationException,
             InterruptedException {

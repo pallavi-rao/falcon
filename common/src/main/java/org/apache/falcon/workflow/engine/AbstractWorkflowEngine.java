@@ -61,7 +61,8 @@ public abstract class AbstractWorkflowEngine {
 
     public abstract String delete(Entity entity, String cluster) throws FalconException;
 
-    public abstract void reRun(String cluster, String wfId, Properties props, boolean isForced) throws FalconException;
+    public abstract String reRun(String cluster, String wfId, Properties props, boolean isForced)
+        throws FalconException;
 
     public abstract void dryRun(Entity entity, String clusterName, Boolean skipDryRun) throws FalconException;
 
@@ -71,11 +72,16 @@ public abstract class AbstractWorkflowEngine {
 
     public abstract boolean isCompleted(Entity entity) throws FalconException;
 
+    public abstract boolean isMissing(Entity entity) throws FalconException;
+
     public abstract InstancesResult getRunningInstances(Entity entity,
                                                         List<LifeCycle> lifeCycles) throws FalconException;
 
     public abstract InstancesResult killInstances(Entity entity, Date start, Date end, Properties props,
                                                   List<LifeCycle> lifeCycles) throws FalconException;
+
+    public abstract InstancesResult ignoreInstances(Entity entity, Date start, Date end, Properties props,
+                                                    List<LifeCycle> lifeCycles) throws FalconException;
 
     public abstract InstancesResult reRunInstances(Entity entity, Date start, Date end, Properties props,
                                                    List<LifeCycle> lifeCycles, Boolean isForced) throws FalconException;
